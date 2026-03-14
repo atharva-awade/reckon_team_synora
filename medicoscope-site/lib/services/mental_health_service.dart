@@ -5,15 +5,19 @@ import 'package:medicoscope/core/constants/api_constants.dart';
 import 'package:medicoscope/services/api_service.dart';
 
 class MentalHealthService {
-  /// Upload audio from file path (mobile)
+  /// Upload audio from file path (mobile) with safety pipeline
   static Future<Map<String, dynamic>> uploadAudio({
     required String filePath,
     required String patientId,
     required String patientName,
     required String doctorId,
+    bool useSafetyPipeline = true,
   }) async {
+    final endpoint = useSafetyPipeline
+        ? ApiConstants.mentalHealthAnalyzeSafe
+        : ApiConstants.mentalHealthAnalyze;
     final url = Uri.parse(
-      '${ApiConstants.chatbotBaseUrl}${ApiConstants.mentalHealthAnalyze}',
+      '${ApiConstants.chatbotBaseUrl}$endpoint',
     );
 
     final request = http.MultipartRequest('POST', url)
@@ -36,16 +40,20 @@ class MentalHealthService {
     }
   }
 
-  /// Upload audio from bytes (web-compatible)
+  /// Upload audio from bytes (web-compatible) with safety pipeline
   static Future<Map<String, dynamic>> uploadAudioBytes({
     required Uint8List audioBytes,
     required String filename,
     required String patientId,
     required String patientName,
     required String doctorId,
+    bool useSafetyPipeline = true,
   }) async {
+    final endpoint = useSafetyPipeline
+        ? ApiConstants.mentalHealthAnalyzeSafe
+        : ApiConstants.mentalHealthAnalyze;
     final url = Uri.parse(
-      '${ApiConstants.chatbotBaseUrl}${ApiConstants.mentalHealthAnalyze}',
+      '${ApiConstants.chatbotBaseUrl}$endpoint',
     );
 
     final request = http.MultipartRequest('POST', url)

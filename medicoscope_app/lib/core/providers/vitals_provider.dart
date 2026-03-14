@@ -316,7 +316,7 @@ class VitalsProvider extends ChangeNotifier {
   /// doesn't fire repeatedly within a short window.
   List<VitalAlert> _checkThresholds(VitalDataPoint point) {
     final alerts = <VitalAlert>[];
-    final now = DateTime.now().toUtc().toIso8601String();
+    final now = '${DateTime.now().toUtc().toIso8601String()}Z';
     final mapsUrl = (_latitude != 0.0 && _longitude != 0.0)
         ? 'https://www.google.com/maps?q=$_latitude,$_longitude'
         : '';

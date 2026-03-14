@@ -4,14 +4,20 @@ import 'package:medicoscope/core/constants/api_constants.dart';
 import 'package:medicoscope/services/api_service.dart';
 
 class MentalHealthService {
+  /// Upload audio with safety pipeline (suicide/self-harm detection + PII anonymization)
   static Future<Map<String, dynamic>> uploadAudio({
     required String filePath,
     required String patientId,
     required String patientName,
     required String doctorId,
+    bool useSafetyPipeline = true,
   }) async {
+    final endpoint = useSafetyPipeline
+        ? ApiConstants.mentalHealthAnalyzeSafe
+        : ApiConstants.mentalHealthAnalyze;
+
     final url = Uri.parse(
-      '${ApiConstants.chatbotBaseUrl}${ApiConstants.mentalHealthAnalyze}',
+      '${ApiConstants.chatbotBaseUrl}$endpoint',
     );
 
     final request = http.MultipartRequest('POST', url)

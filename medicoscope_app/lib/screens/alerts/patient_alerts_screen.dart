@@ -102,9 +102,15 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
 
   String _timeAgo(String isoDate) {
     try {
-      final date = DateTime.parse(isoDate);
-      final diff = DateTime.now().toUtc().difference(date);
-      if (diff.inMinutes < 1) return 'Just now';
+      // Server sends UTC timestamps without 'Z' suffix — force UTC parsing
+      String normalized = isoDate.trim();
+      if (!normalized.endsWith('Z') && !normalized.contains('+')) {
+        normalized += 'Z';
+      }
+      final date = DateTime.parse(normalized).toLocal();
+      final diff = DateTime.now().difference(date);
+      if (diff.isNegative || diff.inSeconds < 30) return 'Just now';
+      if (diff.inMinutes < 1) return '${diff.inSeconds}s ago';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
       if (diff.inHours < 24) return '${diff.inHours}h ago';
       return '${diff.inDays}d ago';
@@ -115,12 +121,17 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
 
   String _formatTimestamp(String isoDate) {
     try {
-      final date = DateTime.parse(isoDate).toLocal();
+      String normalized = isoDate.trim();
+      if (!normalized.endsWith('Z') && !normalized.contains('+')) {
+        normalized += 'Z';
+      }
+      final date = DateTime.parse(normalized).toLocal();
       final hour = date.hour.toString().padLeft(2, '0');
       final minute = date.minute.toString().padLeft(2, '0');
+      final second = date.second.toString().padLeft(2, '0');
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
-      return '$day/$month/${date.year} $hour:$minute';
+      return '$day/$month/${date.year} $hour:$minute:$second';
     } catch (_) {
       return isoDate;
     }

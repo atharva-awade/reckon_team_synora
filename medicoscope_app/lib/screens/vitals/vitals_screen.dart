@@ -846,33 +846,123 @@ class _VitalsScreenState extends State<VitalsScreen>
   }
 
   Widget _buildAlertsSection(bool isDark, VitalsProvider vitals, String lang) {
+    final criticalAlerts = vitals.alerts.where((a) => a.severity == 'critical').toList();
+    final highAlerts = vitals.alerts.where((a) => a.severity == 'high').toList();
+    final warningAlerts = vitals.alerts.where((a) => a.severity == 'warning').toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Icon(Icons.warning_amber_rounded,
-                color: Colors.amber, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              AppStrings.get('preventive_alerts', lang),
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: isDark ? AppTheme.darkTextLight : AppTheme.textDark,
+        // Alert summary bar
+        GlassCard(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.notifications_active_rounded, color: Colors.redAccent, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                '${vitals.alerts.length} Alert${vitals.alerts.length == 1 ? '' : 's'}',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? AppTheme.darkTextLight : AppTheme.textDark,
+                ),
               ),
-            ),
-          ],
+              const Spacer(),
+              if (criticalAlerts.isNotEmpty) _buildAlertBadge('CRITICAL', Colors.redAccent, criticalAlerts.length),
+              if (highAlerts.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                _buildAlertBadge('HIGH', Colors.orange, highAlerts.length),
+              ],
+              if (warningAlerts.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                _buildAlertBadge('WARNING', Colors.amber, warningAlerts.length),
+              ],
+            ],
+          ),
         ),
+
         const SizedBox(height: 8),
-        ...vitals.alerts.map((alert) => _buildAlertCard(alert, isDark)),
+
+        // Critical alerts first
+        if (criticalAlerts.isNotEmpty) ...[
+          ...criticalAlerts.reversed.take(5).map((alert) => _buildAlertCard(alert, isDark)),
+        ],
+
+        // High alerts
+        if (highAlerts.isNotEmpty) ...[
+          ...highAlerts.reversed.take(5).map((alert) => _buildAlertCard(alert, isDark)),
+        ],
+
+        // Warning alerts
+        if (warningAlerts.isNotEmpty) ...[
+          ...warningAlerts.reversed.take(3).map((alert) => _buildAlertCard(alert, isDark)),
+        ],
+
+        // Doctor notification status
+        if (vitals.alerts.isNotEmpty)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(top: 4, bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF4CAF50).withOpacity(0.08),
+              borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+              border: Border.all(color: const Color(0xFF4CAF50).withOpacity(0.2)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.medical_services_outlined, color: Color(0xFF4CAF50), size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    criticalAlerts.isNotEmpty
+                        ? 'Critical alerts sent to linked doctor'
+                        : 'All alerts logged and available for doctor review',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4CAF50),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
 
+  Widget _buildAlertBadge(String label, Color color, int count) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '$count $label',
+        style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: color),
+      ),
+    );
+  }
+
   Widget _buildAlertCard(VitalAlert alert, bool isDark) {
-    final isCritical = alert.severity == 'critical';
-    final alertColor = isCritical ? Colors.redAccent : Colors.amber;
+    Color alertColor;
+    IconData alertIcon;
+    switch (alert.severity) {
+      case 'critical':
+        alertColor = Colors.redAccent;
+        alertIcon = Icons.emergency_rounded;
+        break;
+      case 'high':
+        alertColor = Colors.orange;
+        alertIcon = Icons.warning_rounded;
+        break;
+      default:
+        alertColor = Colors.amber;
+        alertIcon = Icons.warning_amber_rounded;
+    }
 
     return Container(
       width: double.infinity,
@@ -886,11 +976,7 @@ class _VitalsScreenState extends State<VitalsScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            isCritical ? Icons.emergency_rounded : Icons.warning_amber_rounded,
-            color: alertColor,
-            size: 20,
-          ),
+          Icon(alertIcon, color: alertColor, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -899,18 +985,29 @@ class _VitalsScreenState extends State<VitalsScreen>
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: alertColor.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         alert.severity.toUpperCase(),
+                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: alertColor),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: (isDark ? Colors.white : Colors.black).withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        alert.type == 'sudden_change' ? 'SUDDEN CHANGE' : 'THRESHOLD',
                         style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
-                          color: alertColor,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? AppTheme.darkTextGray : AppTheme.textGray,
                         ),
                       ),
                     ),
@@ -919,8 +1016,7 @@ class _VitalsScreenState extends State<VitalsScreen>
                       _formatAlertTime(alert.timestamp),
                       style: TextStyle(
                         fontSize: 9,
-                        color:
-                            isDark ? AppTheme.darkTextDim : AppTheme.textLight,
+                        color: isDark ? AppTheme.darkTextDim : AppTheme.textLight,
                       ),
                     ),
                   ],
@@ -944,7 +1040,11 @@ class _VitalsScreenState extends State<VitalsScreen>
 
   String _formatAlertTime(String isoTimestamp) {
     try {
-      final dt = DateTime.parse(isoTimestamp).toLocal();
+      String normalized = isoTimestamp.trim();
+      if (!normalized.endsWith('Z') && !normalized.contains('+')) {
+        normalized += 'Z';
+      }
+      final dt = DateTime.parse(normalized).toLocal();
       return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}';
     } catch (_) {
       return '';

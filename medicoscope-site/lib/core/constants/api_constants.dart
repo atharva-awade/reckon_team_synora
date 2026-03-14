@@ -74,4 +74,25 @@ class ApiConstants {
   // Nearby Doctors (patient search)
   static const String nearbyDoctorsSearch = '/nearby-doctors/search';
   static const String nearbyDoctorsSpecializations = '/nearby-doctors/specializations';
+
+  // Health Profile
+  static const String healthProfile = '/health-profile';
+
+  // Health Events (unified timeline)
+  static const String healthEvents = '/health-events';
+
+  // Escalations
+  static const String escalations = '/escalations';
+
+  // Documents (medical document upload & parsing)
+  static const String documents = '/documents';
+
+  // Explainable AI
+  static const String explain = '/explain';
+
+  // Triage
+  static const String triage = '/triage';
+
+  // Mental Health Safety (upgraded endpoint)
+  static const String mentalHealthAnalyzeSafe = '/mental-health/analyze-safe';
 }

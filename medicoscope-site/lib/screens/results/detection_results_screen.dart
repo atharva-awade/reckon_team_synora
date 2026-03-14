@@ -8,7 +8,10 @@ import 'package:medicoscope/core/widgets/glass_card.dart';
 import 'package:medicoscope/core/widgets/theme_toggle_button.dart';
 import 'package:medicoscope/core/locale/locale_provider.dart';
 import 'package:medicoscope/core/locale/app_strings.dart';
+import 'package:medicoscope/core/providers/auth_provider.dart';
 import 'package:medicoscope/models/detection_result.dart';
+import 'package:medicoscope/models/explainable_result.dart';
+import 'package:medicoscope/services/explain_service.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:medicoscope/core/theme/theme_provider.dart';
@@ -39,12 +42,41 @@ class DetectionResultsScreen extends StatefulWidget {
 
 class _DetectionResultsScreenState extends State<DetectionResultsScreen> {
   Size? _imageSize;
+  ExplainableResult? _explanation;
+  bool _isLoadingExplanation = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.result.hasBoundingBox) {
       _loadImageSize();
+    }
+    _fetchExplanation();
+  }
+
+  Future<void> _fetchExplanation() async {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    if (auth.token == null) return;
+
+    setState(() => _isLoadingExplanation = true);
+
+    try {
+      final service = ExplainService(auth.token!);
+      final result = await service.generateExplanation(
+        className: widget.result.className,
+        confidence: widget.result.confidence,
+        category: widget.result.category,
+      );
+      if (mounted && result != null) {
+        setState(() {
+          _explanation = result;
+          _isLoadingExplanation = false;
+        });
+      } else {
+        if (mounted) setState(() => _isLoadingExplanation = false);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingExplanation = false);
     }
   }
 
@@ -263,6 +295,28 @@ class _DetectionResultsScreenState extends State<DetectionResultsScreen> {
                               .fadeIn(delay: 200.ms, duration: 600.ms)
                               .slideY(begin: 0.2, end: 0),
 
+                          const SizedBox(height: AppTheme.spacingLarge),
+
+                          // Explainable AI Section
+                          if (_isLoadingExplanation)
+                            GlassCard(
+                              child: Row(
+                                children: [
+                                  const SizedBox(
+                                    width: 20, height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                  const SizedBox(width: AppTheme.spacingMedium),
+                                  Text(
+                                    'Generating AI explanation...',
+                                    style: TextStyle(color: AppTheme.textGray, fontSize: 14),
+                                  ),
+                                ],
+                              ),
+                            ).animate().fadeIn(duration: 400.ms)
+                          else if (_explanation != null)
+                            ..._buildExplainableSections(),
+
                           const SizedBox(height: AppTheme.spacingXLarge),
 
                           // 3D Model Viewer
@@ -394,6 +448,144 @@ class _DetectionResultsScreenState extends State<DetectionResultsScreen> {
         },
       ),
     );
+  }
+
+  List<Widget> _buildExplainableSections() {
+    final e = _explanation!;
+    return [
+      if (e.whatItIs.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.info_outline,
+          title: 'What is ${e.laymanName.isNotEmpty ? e.laymanName : e.conditionName}?',
+          content: e.whatItIs,
+        ),
+      if (e.whyItOccurs.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.help_outline,
+          title: 'Why does this occur?',
+          content: e.whyItOccurs,
+        ),
+      if (e.howItAffectsBody.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.health_and_safety_outlined,
+          title: 'How it affects your body',
+          content: e.howItAffectsBody,
+        ),
+      if (e.aiConfidence.explanation.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.psychology_outlined,
+          title: 'AI Confidence: ${e.aiConfidence.interpretation}',
+          content: e.aiConfidence.explanation,
+          items: e.aiConfidence.factorsAffectingConfidence,
+        ),
+      if (e.associatedSymptoms.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.visibility_outlined,
+          title: 'Symptoms to watch for',
+          items: e.associatedSymptoms,
+        ),
+      if (e.immediatePrecautions.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.warning_amber_outlined,
+          title: 'Immediate precautions',
+          items: e.immediatePrecautions,
+          accentColor: Colors.red.shade700,
+        ),
+      if (e.lifestyleImprovements.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.favorite_outline,
+          title: 'Lifestyle improvements',
+          items: e.lifestyleImprovements,
+          accentColor: Colors.green.shade700,
+        ),
+      if (e.whenToConsult.specialist.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.local_hospital_outlined,
+          title: 'When to see a doctor',
+          content: '${e.whenToConsult.reason}\n\nSpecialist: ${e.whenToConsult.specialist}\nUrgency: ${e.whenToConsult.urgency.replaceAll('_', ' ')}'
+              '${e.whenToConsult.whatDoctorWillDo.isNotEmpty ? '\n\nWhat to expect: ${e.whenToConsult.whatDoctorWillDo}' : ''}',
+          accentColor: Colors.blue.shade700,
+        ),
+      if (e.personalizedRiskContext.isNotEmpty)
+        _buildExplainCard(
+          icon: Icons.person_outline,
+          title: 'Your personal risk context',
+          content: e.personalizedRiskContext,
+        ),
+    ];
+  }
+
+  Widget _buildExplainCard({
+    required IconData icon,
+    required String title,
+    String? content,
+    List<String>? items,
+    Color? accentColor,
+  }) {
+    final color = accentColor ?? AppTheme.primaryOrange;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppTheme.spacingMedium),
+      child: GlassCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color, size: 20),
+                const SizedBox(width: AppTheme.spacingSmall),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textDark,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (content != null && content.isNotEmpty) ...[
+              const SizedBox(height: AppTheme.spacingSmall),
+              Text(
+                content,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.6,
+                  color: AppTheme.textGray,
+                ),
+              ),
+            ],
+            if (items != null && items.isNotEmpty) ...[
+              const SizedBox(height: AppTheme.spacingSmall),
+              ...items.map((item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Icon(Icons.circle, size: 6, color: color),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            item,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.5,
+                              color: AppTheme.textGray,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+            ],
+          ],
+        ),
+      ),
+    ).animate().fadeIn(delay: 300.ms, duration: 500.ms).slideY(begin: 0.1, end: 0);
   }
 
   Widget _buildImagePreview() {

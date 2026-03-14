@@ -185,13 +185,30 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   String _timeAgo(String isoDate) {
     try {
       final date = DateTime.parse(isoDate);
-      final diff = DateTime.now().toUtc().difference(date);
-      if (diff.inMinutes < 1) return 'Just now';
+      final now = DateTime.now().toUtc();
+      final diff = now.difference(date);
+      if (diff.isNegative) return 'Just now';
+      if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
       if (diff.inHours < 24) return '${diff.inHours}h ago';
       return '${diff.inDays}d ago';
     } catch (_) {
       return '';
+    }
+  }
+
+  String _formatTimestamp(String isoDate) {
+    try {
+      final date = DateTime.parse(isoDate).toLocal();
+      final hour =
+          date.hour > 12 ? date.hour - 12 : (date.hour == 0 ? 12 : date.hour);
+      final amPm = date.hour >= 12 ? 'PM' : 'AM';
+      final minute = date.minute.toString().padLeft(2, '0');
+      final day = date.day.toString().padLeft(2, '0');
+      final month = date.month.toString().padLeft(2, '0');
+      return '$day/$month/${date.year} $hour:$minute $amPm';
+    } catch (_) {
+      return isoDate;
     }
   }
 
@@ -451,7 +468,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          _timeAgo(a['created_at'] ?? ''),
+                          _formatTimestamp(a['created_at'] ?? ''),
                           style: TextStyle(
                             fontSize: 11,
                             color: isDark
@@ -542,7 +559,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                         isDark,
                         Icons.access_time,
                         AppStrings.get('time', lang),
-                        a['timestamp'] ?? '',
+                        _formatTimestamp(
+                            a['created_at'] ?? a['timestamp'] ?? ''),
                       ),
 
                       const SizedBox(height: 10),
@@ -816,7 +834,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          _timeAgo(n['created_at'] ?? ''),
+                          _formatTimestamp(n['created_at'] ?? ''),
                           style: TextStyle(
                             fontSize: 11,
                             color: isDark

@@ -10,6 +10,7 @@ import 'package:medicoscope/core/locale/locale_provider.dart';
 import 'package:medicoscope/core/providers/auth_provider.dart';
 import 'package:medicoscope/core/providers/coins_provider.dart';
 import 'package:medicoscope/core/providers/vitals_provider.dart';
+import 'package:medicoscope/core/providers/health_profile_provider.dart';
 import 'package:medicoscope/screens/onboarding/user_guide_screen.dart';
 import 'package:medicoscope/screens/storyline/storyline_screen.dart';
 import 'package:medicoscope/screens/dashboard/patient_dashboard_screen.dart';
@@ -45,6 +46,7 @@ void main() {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => CoinsProvider()),
         ChangeNotifierProvider(create: (_) => VitalsProvider()),
+        ChangeNotifierProvider(create: (_) => HealthProfileProvider()),
       ],
       child: const MedicoScopeApp(),
     ),
@@ -90,6 +92,14 @@ class MedicoScopeApp extends StatelessWidget {
           // Sync auth token to CoinsProvider for DB rewards sync
           final coins = Provider.of<CoinsProvider>(context, listen: false);
           coins.setToken(auth.token);
+
+          // Load health profile when authenticated
+          if (auth.isAuthenticated && auth.isPatient && auth.token != null) {
+            final healthProfile = Provider.of<HealthProfileProvider>(context, listen: false);
+            if (healthProfile.profile == null && !healthProfile.isLoading) {
+              healthProfile.loadProfile(auth.token!);
+            }
+          }
 
           if (auth.isLoading) {
             return const Scaffold(

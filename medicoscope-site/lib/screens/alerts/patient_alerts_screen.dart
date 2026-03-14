@@ -104,8 +104,10 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
   String _timeAgo(String isoDate) {
     try {
       final date = DateTime.parse(isoDate);
-      final diff = DateTime.now().toUtc().difference(date);
-      if (diff.inMinutes < 1) return 'Just now';
+      final now = DateTime.now().toUtc();
+      final diff = now.difference(date);
+      if (diff.isNegative) return 'Just now';
+      if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
       if (diff.inHours < 24) return '${diff.inHours}h ago';
       return '${diff.inDays}d ago';
@@ -139,155 +141,163 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
         builder: (context, constraints) {
           final wide = kIsWeb && constraints.maxWidth >= 900;
           Widget content = Container(
-        decoration: BoxDecoration(
-          gradient: isDark
-              ? AppTheme.darkBackgroundGradient
-              : AppTheme.backgroundGradient,
-        ),
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Padding(
-                padding: const EdgeInsets.all(AppTheme.spacingMedium),
-                child: Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.arrow_back_ios),
-                      color: isDark ? AppTheme.darkTextLight : AppTheme.textDark,
-                    ),
-                    Expanded(
-                      child: Text(
-                        AppStrings.get('health_alerts', lang),
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          color:
-                              isDark ? AppTheme.darkTextLight : AppTheme.textDark,
-                        ),
-                      ),
-                    ),
-                    if (unreadCount > 0)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFF5252).withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          AppStrings.format('new_alerts', lang, {'count': '$unreadCount'}),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFFFF5252),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-
-              // Summary card
-              if (_alerts.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppTheme.spacingLarge,
-                  ),
-                  child: GlassCard(
+            decoration: BoxDecoration(
+              gradient: isDark
+                  ? AppTheme.darkBackgroundGradient
+                  : AppTheme.backgroundGradient,
+            ),
+            child: SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Padding(
                     padding: const EdgeInsets.all(AppTheme.spacingMedium),
                     child: Row(
                       children: [
-                        _buildSummaryItem(
-                          isDark,
-                          '${_alerts.length}',
-                          AppStrings.get('total', lang),
-                          const Color(0xFF667EEA),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.arrow_back_ios),
+                          color: isDark
+                              ? AppTheme.darkTextLight
+                              : AppTheme.textDark,
                         ),
-                        _buildSummaryDivider(isDark),
-                        _buildSummaryItem(
-                          isDark,
-                          '${_alerts.where((a) => a['severity'] == 'critical').length}',
-                          AppStrings.get('critical', lang),
-                          const Color(0xFFFF5252),
-                        ),
-                        _buildSummaryDivider(isDark),
-                        _buildSummaryItem(
-                          isDark,
-                          '${_alerts.where((a) => a['doctor_notified'] == true).length}',
-                          AppStrings.get('sent_to_doctor', lang),
-                          const Color(0xFF4CAF50),
-                        ),
-                      ],
-                    ),
-                  ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1, end: 0),
-                ),
-
-              const SizedBox(height: AppTheme.spacingMedium),
-
-              // Alerts list
-              Expanded(
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _alerts.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.notifications_none_rounded,
-                                  size: 64,
-                                  color: isDark
-                                      ? AppTheme.darkTextDim
-                                      : AppTheme.textLight,
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  AppStrings.get('no_alerts_yet', lang),
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: isDark
-                                        ? AppTheme.darkTextGray
-                                        : AppTheme.textGray,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  AppStrings.get('alerts_appear_here', lang),
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: isDark
-                                        ? AppTheme.darkTextDim
-                                        : AppTheme.textLight,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : RefreshIndicator(
-                            onRefresh: _fetchAlerts,
-                            child: ListView.builder(
-                              physics: const BouncingScrollPhysics(
-                                parent: AlwaysScrollableScrollPhysics(),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AppTheme.spacingLarge,
-                              ),
-                              itemCount: _alerts.length,
-                              itemBuilder: (context, index) =>
-                                  _buildAlertCard(index, isDark, lang),
+                        Expanded(
+                          child: Text(
+                            AppStrings.get('health_alerts', lang),
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: isDark
+                                  ? AppTheme.darkTextLight
+                                  : AppTheme.textDark,
                             ),
                           ),
+                        ),
+                        if (unreadCount > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFF5252).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              AppStrings.format('new_alerts', lang,
+                                  {'count': '$unreadCount'}),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFFF5252),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  // Summary card
+                  if (_alerts.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppTheme.spacingLarge,
+                      ),
+                      child: GlassCard(
+                        padding: const EdgeInsets.all(AppTheme.spacingMedium),
+                        child: Row(
+                          children: [
+                            _buildSummaryItem(
+                              isDark,
+                              '${_alerts.length}',
+                              AppStrings.get('total', lang),
+                              const Color(0xFF667EEA),
+                            ),
+                            _buildSummaryDivider(isDark),
+                            _buildSummaryItem(
+                              isDark,
+                              '${_alerts.where((a) => a['severity'] == 'critical').length}',
+                              AppStrings.get('critical', lang),
+                              const Color(0xFFFF5252),
+                            ),
+                            _buildSummaryDivider(isDark),
+                            _buildSummaryItem(
+                              isDark,
+                              '${_alerts.where((a) => a['doctor_notified'] == true).length}',
+                              AppStrings.get('sent_to_doctor', lang),
+                              const Color(0xFF4CAF50),
+                            ),
+                          ],
+                        ),
+                      )
+                          .animate()
+                          .fadeIn(duration: 400.ms)
+                          .slideY(begin: 0.1, end: 0),
+                    ),
+
+                  const SizedBox(height: AppTheme.spacingMedium),
+
+                  // Alerts list
+                  Expanded(
+                    child: _isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : _alerts.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.notifications_none_rounded,
+                                      size: 64,
+                                      color: isDark
+                                          ? AppTheme.darkTextDim
+                                          : AppTheme.textLight,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      AppStrings.get('no_alerts_yet', lang),
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: isDark
+                                            ? AppTheme.darkTextGray
+                                            : AppTheme.textGray,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      AppStrings.get(
+                                          'alerts_appear_here', lang),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: isDark
+                                            ? AppTheme.darkTextDim
+                                            : AppTheme.textLight,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : RefreshIndicator(
+                                onRefresh: _fetchAlerts,
+                                child: ListView.builder(
+                                  physics: const BouncingScrollPhysics(
+                                    parent: AlwaysScrollableScrollPhysics(),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: AppTheme.spacingLarge,
+                                  ),
+                                  itemCount: _alerts.length,
+                                  itemBuilder: (context, index) =>
+                                      _buildAlertCard(index, isDark, lang),
+                                ),
+                              ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      );
+            ),
+          );
           if (wide) {
             content = Center(
               child: ConstrainedBox(
@@ -404,7 +414,7 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          _timeAgo(a['created_at'] ?? ''),
+                          _formatTimestamp(a['created_at'] ?? ''),
                           style: TextStyle(
                             fontSize: 11,
                             color: isDark
@@ -466,7 +476,8 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
                 Divider(color: isDark ? Colors.white12 : Colors.black12),
                 const SizedBox(height: 8),
 
-                _buildInfoRow(isDark, AppStrings.get('vital', lang), vital.replaceAll('_', ' ')),
+                _buildInfoRow(isDark, AppStrings.get('vital', lang),
+                    vital.replaceAll('_', ' ')),
                 _buildInfoRow(
                   isDark,
                   AppStrings.get('current_value', lang),
@@ -482,7 +493,8 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
                   AppStrings.get('location', lang),
                   a['location'] ?? 'Unknown',
                 ),
-                if (a['maps_url'] != null && (a['maps_url'] as String).isNotEmpty)
+                if (a['maps_url'] != null &&
+                    (a['maps_url'] as String).isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Row(
@@ -493,7 +505,8 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.map, size: 14, color: Color(0xFF667EEA)),
+                              const Icon(Icons.map,
+                                  size: 14, color: Color(0xFF667EEA)),
                               const SizedBox(width: 4),
                               Text(
                                 AppStrings.get('open_maps', lang),

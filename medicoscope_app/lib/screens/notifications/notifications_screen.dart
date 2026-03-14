@@ -184,9 +184,14 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   String _timeAgo(String isoDate) {
     try {
-      final date = DateTime.parse(isoDate);
-      final diff = DateTime.now().toUtc().difference(date);
-      if (diff.inMinutes < 1) return 'Just now';
+      String normalized = isoDate.trim();
+      if (!normalized.endsWith('Z') && !normalized.contains('+')) {
+        normalized += 'Z';
+      }
+      final date = DateTime.parse(normalized).toLocal();
+      final diff = DateTime.now().difference(date);
+      if (diff.isNegative || diff.inSeconds < 30) return 'Just now';
+      if (diff.inMinutes < 1) return '${diff.inSeconds}s ago';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
       if (diff.inHours < 24) return '${diff.inHours}h ago';
       return '${diff.inDays}d ago';

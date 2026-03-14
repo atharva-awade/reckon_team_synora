@@ -269,6 +269,51 @@ class ChatService {
         }
       }
 
+      // Health Profile
+      try {
+        final profileData = await api.get(ApiConstants.healthProfile);
+        final profile = profileData['profile'] as Map<String, dynamic>?;
+        if (profile != null && profile['isComplete'] == true) {
+          parts.add('\n--- Health Profile ---');
+          final demo = profile['demographics'] as Map<String, dynamic>? ?? {};
+          if (demo['age'] != null && demo['age'] > 0) parts.add('Age: ${demo['age']}, Sex: ${demo['sex'] ?? 'unknown'}');
+          if (demo['bmi'] != null && demo['bmi'] > 0) parts.add('BMI: ${demo['bmi']}');
+
+          final history = profile['medicalHistory'] as Map<String, dynamic>? ?? {};
+          final chronic = List.from(history['chronicConditions'] ?? []);
+          if (chronic.isNotEmpty) parts.add('Chronic Conditions: ${chronic.join(", ")}');
+          final allergies = List.from(history['allergies'] ?? []);
+          if (allergies.isNotEmpty) parts.add('Allergies: ${allergies.join(", ")}');
+          final family = List.from(history['familyHistory'] ?? []);
+          if (family.isNotEmpty) {
+            parts.add('Family History: ${family.map((f) => '${f['condition']} (${f['relation']})').join(", ")}');
+          }
+
+          final life = profile['lifestyle'] as Map<String, dynamic>? ?? {};
+          parts.add('Lifestyle: Smoking=${life['smokingStatus'] ?? 'unknown'}, Alcohol=${life['alcoholConsumption'] ?? 'unknown'}, Exercise=${life['exerciseFrequency'] ?? 'unknown'}');
+
+          if (profile['riskScore'] != null) parts.add('Risk Score: ${profile['riskScore']}/100');
+        }
+      } catch (_) {}
+
+      // Recent Document Uploads
+      try {
+        final docsData = await api.get(ApiConstants.documents);
+        final docs = List<Map<String, dynamic>>.from(docsData['documents'] ?? []);
+        if (docs.isNotEmpty) {
+          parts.add('\n--- Recent Document Uploads ---');
+          for (final doc in docs.take(5)) {
+            final abnormals = List.from(doc['abnormalValues'] ?? []);
+            if (abnormals.isNotEmpty) {
+              final flags = abnormals.map((a) => '${a['name']}: ${a['flag']}').join(', ');
+              parts.add('• ${doc['documentType'] ?? 'Report'} (${doc['createdAt'] ?? 'unknown date'}): $flags');
+            } else {
+              parts.add('• ${doc['documentType'] ?? 'Report'} (${doc['createdAt'] ?? 'unknown date'}): All values normal');
+            }
+          }
+        }
+      } catch (_) {}
+
       if (parts.isEmpty) return '';
       return parts.join('\n');
     } catch (_) {

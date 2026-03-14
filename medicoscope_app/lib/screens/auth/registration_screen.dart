@@ -445,7 +445,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
       // Blood Group dropdown
       DropdownButtonFormField<String>(
-        initialValue: _bloodGroup,
+        value: _bloodGroup,
         decoration: InputDecoration(
           labelText: AppStrings.get('blood_group', lang),
           prefixIcon: const Icon(Icons.bloodtype_outlined,
@@ -501,7 +501,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       const SizedBox(height: AppTheme.spacingMedium),
 
       DropdownButtonFormField<String>(
-        initialValue: _emergencyRelationship,
+        value: _emergencyRelationship,
         decoration: InputDecoration(
           labelText: AppStrings.get('relationship', lang),
           prefixIcon: const Icon(Icons.people_outlined,
