@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:medicoscope/core/theme/app_theme.dart';
@@ -26,11 +27,23 @@ class DoctorDashboardScreen extends StatefulWidget {
 
 class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
   int _unreadVitalsAlerts = 0;
+  Timer? _alertRefreshTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchAlertCount();
+    // Auto-refresh alert count every 5 seconds
+    _alertRefreshTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _fetchAlertCount(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _alertRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchAlertCount() async {

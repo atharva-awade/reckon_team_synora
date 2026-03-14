@@ -41,10 +41,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     _tabController = TabController(length: 2, vsync: this);
     _fetchMentalNotifications();
     _fetchVitalsAlerts();
-    // Auto-refresh vitals alerts every 10 seconds
+    // Auto-refresh alerts every 3 seconds for near real-time
     _refreshTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => _fetchVitalsAlerts(silent: true),
+      const Duration(seconds: 3),
+      (_) {
+        _fetchVitalsAlerts(silent: true);
+        _fetchMentalNotifications();
+      },
     );
   }
 

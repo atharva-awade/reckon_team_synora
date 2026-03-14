@@ -171,6 +171,24 @@ class _MentalHealthScreenState extends State<MentalHealthScreen>
           coinsEarned: coins,
           doctorId: _linkedDoctorId.isNotEmpty ? _linkedDoctorId : null,
         );
+
+        // Also save mental health notification directly to Node.js
+        // (backup in case Python→Node.js notification fails)
+        if (_linkedDoctorId.isNotEmpty && result['doctor_report'] != null) {
+          try {
+            final api = ApiService(token: authProvider.token!);
+            await api.post(ApiConstants.mentalHealthNotifications, {
+              'doctorId': _linkedDoctorId,
+              'patientId': user?.id ?? '',
+              'patientName': user?.name ?? 'Unknown',
+              'clinicalReport': result['doctor_report'] as String,
+              'urgency': result['urgency'] as String? ?? 'low',
+              'transcript': result['transcript'] as String? ?? '',
+            });
+          } catch (_) {
+            // Best effort
+          }
+        }
       }
     } catch (e) {
       _hourglassController.stop();
