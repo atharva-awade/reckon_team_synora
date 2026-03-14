@@ -43,7 +43,7 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
 
     // Vitals alerts
     try {
-      final alerts = await VitalsService.getDoctorAlerts(doctorId: userId);
+      final alerts = await VitalsService.getDoctorAlerts(doctorId: userId, token: token);
       totalUnread += alerts.where((a) => !(a['read'] ?? false)).length;
     } catch (_) {}
 

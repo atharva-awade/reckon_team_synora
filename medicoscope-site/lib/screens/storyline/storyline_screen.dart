@@ -1,13 +1,7 @@
-import 'dart:async';
 import 'dart:math';
-import 'dart:ui';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:medicoscope/screens/welcome/welcome_screen.dart';
 
-/// Scroll-driven frame animation with smooth interpolation.
-/// Skip button triggers fast auto-play through remaining frames.
 class StorylineScreen extends StatefulWidget {
   const StorylineScreen({super.key});
 
@@ -15,34 +9,25 @@ class StorylineScreen extends StatefulWidget {
   State<StorylineScreen> createState() => _StorylineScreenState();
 }
 
-class _StorylineScreenState extends State<StorylineScreen>
-    with SingleTickerProviderStateMixin {
-  // ── Smooth scroll state ──
-  double _targetFraction = 0; // where user wants to be (0..1)
-  double _displayFraction = 0; // smoothly interpolated value
+class _StorylineScreenState extends State<StorylineScreen> {
+  final ScrollController _scrollController = ScrollController();
   int _currentFrame = 1;
+  double _fraction = 0;
   bool _navigated = false;
+  bool _isSkipping = false;
 
-  // ── Auto-play state ──
-  late final AnimationController _autoPlayController;
-  double _autoPlayStart = 0;
-  bool _isAutoPlaying = false;
-
-  // ── Smooth ticker ──
-  late final Ticker _ticker;
-
-  // ── Preloading ──
+  // Preloading
   double _loadProgress = 0;
   bool _ready = false;
+  bool _allLoaded = false;
   late final List<NetworkImage> _providers;
   final Set<int> _cachedFrames = {};
 
   static const int _totalFrames = 826;
   static const int _batchSize = 30;
-  // How much one mouse wheel tick scrolls (fraction of total)
-  static const double _scrollSensitivity = 0.008;
-  // Lerp factor per frame — higher = snappier, lower = smoother
-  static const double _smoothFactor = 0.12;
+
+  // Matches HTML: body { height: 800vh } → scroll height = 8× viewport
+  static const double _scrollMultiplier = 8.0;
 
   @override
   void initState() {
@@ -51,27 +36,15 @@ class _StorylineScreenState extends State<StorylineScreen>
       _totalFrames,
       (i) => NetworkImage(_framePath(i + 1)),
     );
-
-    // Auto-play animation controller (6 seconds for full playback)
-    _autoPlayController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 6),
-    )..addListener(_onAutoPlayTick);
-
-    // Smooth interpolation ticker — runs every frame
-    _ticker = createTicker(_onTick)..start();
-
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) => _preloadAll());
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
-    _autoPlayController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
-
-  // ── Frame path ─────────────────────────────────────────────────────────────
 
   String _framePath(int frame) =>
       'walkthrough/ezgif-frame-${frame.toString().padLeft(3, '0')}.jpg';
@@ -108,111 +81,98 @@ class _StorylineScreenState extends State<StorylineScreen>
       }
     }
 
-    if (mounted && !_ready) setState(() => _ready = true);
+    if (mounted) {
+      setState(() {
+        _allLoaded = true;
+        if (!_ready) _ready = true;
+      });
+    }
   }
 
-  // ── Smooth ticker (runs every frame ~60fps) ────────────────────────────────
+  // ── Scroll handler (matches HTML: scrollFraction = scrollTop / maxScroll) ──
 
-  void _onTick(Duration elapsed) {
+  void _onScroll() {
     if (!_ready) return;
 
-    // Lerp toward target
-    final diff = _targetFraction - _displayFraction;
-    if (diff.abs() < 0.0001) {
-      // Close enough — snap
-      if (_displayFraction != _targetFraction) {
-        _displayFraction = _targetFraction;
-        _updateFrame();
-      }
-      return;
-    }
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    if (maxScroll <= 0) return;
 
-    _displayFraction = lerpDouble(_displayFraction, _targetFraction, _smoothFactor)!;
-    _updateFrame();
-  }
+    final scrollFraction =
+        (_scrollController.offset / maxScroll).clamp(0.0, 1.0);
 
-  void _updateFrame() {
-    final fraction = _displayFraction.clamp(0.0, 1.0);
-    final targetFrame = (fraction * (_totalFrames - 1)).round() + 1;
+    // Match HTML: frameIndex = Math.floor(scrollFraction * frameCount)
+    final targetFrame =
+        (scrollFraction * (_totalFrames - 1)).floor().clamp(0, _totalFrames - 1) + 1;
 
+    // Use exact frame if cached, otherwise nearest cached
     final displayFrame = _cachedFrames.contains(targetFrame)
         ? targetFrame
         : _nearestCachedFrame(targetFrame);
 
-    if (displayFrame != _currentFrame || fraction != _displayFraction) {
+    if (displayFrame != _currentFrame || scrollFraction != _fraction) {
       setState(() {
         _currentFrame = displayFrame;
+        _fraction = scrollFraction;
       });
     }
 
-    // Auto-navigate at the end
-    if (fraction >= 0.99 && !_navigated) {
+    if (scrollFraction >= 0.99 && !_navigated) {
       _navigated = true;
-      Future.delayed(const Duration(milliseconds: 400), _navigateToWelcome);
+      Future.delayed(const Duration(milliseconds: 600), _navigateToWelcome);
     }
   }
 
   int _nearestCachedFrame(int target) {
     if (_cachedFrames.isEmpty) return 1;
-    int best = _currentFrame;
-    int bestDist = (target - best).abs();
-    for (int d = 1; d <= 30; d++) {
+    for (int d = 0; d <= 50; d++) {
       if (target + d <= _totalFrames && _cachedFrames.contains(target + d)) {
-        if (d < bestDist) best = target + d;
-        break;
+        return target + d;
       }
       if (target - d >= 1 && _cachedFrames.contains(target - d)) {
-        if (d < bestDist) best = target - d;
-        break;
+        return target - d;
       }
     }
-    return best;
+    return _currentFrame;
   }
 
-  // ── Pointer / scroll input ─────────────────────────────────────────────────
+  // ── Skip (matches HTML: window.scrollTo({ top: max, behavior: 'smooth' }))
 
-  void _onPointerSignal(PointerSignalEvent event) {
-    if (!_ready || _isAutoPlaying) return;
-    if (event is PointerScrollEvent) {
-      // scrollDelta.dy > 0 = scroll down = advance, < 0 = scroll up = rewind
-      final delta = event.scrollDelta.dy > 0
-          ? _scrollSensitivity
-          : -_scrollSensitivity;
-      _targetFraction = (_targetFraction + delta).clamp(0.0, 1.0);
+  void _startSkip() {
+    if (_isSkipping) return;
+    setState(() => _isSkipping = true);
+
+    if (!_allLoaded) {
+      _waitAndSkip();
+      return;
     }
+    _doSkip();
   }
 
-  // Track drag for touch / trackpad
-  void _onVerticalDragUpdate(DragUpdateDetails details) {
-    if (!_ready || _isAutoPlaying) return;
-    final screenH = MediaQuery.of(context).size.height;
-    // Dragging up (negative dy) = advance
-    final delta = -details.delta.dy / (screenH * 2);
-    _targetFraction = (_targetFraction + delta).clamp(0.0, 1.0);
+  Future<void> _waitAndSkip() async {
+    while (!_allLoaded && mounted) {
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+
+    if (mounted) _doSkip();
   }
 
-  // ── Auto-play (skip) ──────────────────────────────────────────────────────
+  void _doSkip() {
+    if (!_scrollController.hasClients) return;
 
-  void _startAutoPlay() {
-    if (_isAutoPlaying) return;
-    _isAutoPlaying = true;
-    _autoPlayStart = _displayFraction;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    if (maxScroll <= 0) return;
 
-    // Scale duration based on how much is left
-    final remaining = 1.0 - _autoPlayStart;
-    final ms = (remaining * 6000).round().clamp(1000, 6000);
-    _autoPlayController.duration = Duration(milliseconds: ms);
-    _autoPlayController.forward(from: 0);
+    final currentOffset = _scrollController.offset;
+    final remaining = maxScroll - currentOffset;
 
-    setState(() {}); // hide skip button
-  }
+    // Scale duration by remaining distance (15s for full, proportional otherwise)
+    final ms = ((remaining / maxScroll) * 15000).round().clamp(2000, 15000);
 
-  void _onAutoPlayTick() {
-    final t = Curves.easeInOut.transform(_autoPlayController.value);
-    _targetFraction = _autoPlayStart + (1.0 - _autoPlayStart) * t;
-    // During auto-play, skip the lerp and drive display directly for smoothness
-    _displayFraction = _targetFraction;
-    _updateFrame();
+    _scrollController.animateTo(
+      maxScroll,
+      duration: Duration(milliseconds: ms),
+      curve: Curves.linear,
+    );
   }
 
   // ── Navigation ─────────────────────────────────────────────────────────────
@@ -234,106 +194,150 @@ class _StorylineScreenState extends State<StorylineScreen>
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final fraction = _displayFraction.clamp(0.0, 1.0);
-
+    final screenHeight = MediaQuery.of(context).size.height;
     return Scaffold(
       backgroundColor: const Color(0xFF050505),
-      body: Listener(
-        onPointerSignal: _onPointerSignal,
-        child: GestureDetector(
-          onVerticalDragUpdate: _onVerticalDragUpdate,
-          behavior: HitTestBehavior.translucent,
-          child: Stack(
-            children: [
-              // Frame image
-              Positioned.fill(
-                child: RepaintBoundary(
-                  child: Image(
-                    image: _providers[_currentFrame - 1],
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, __, ___) =>
-                        Container(color: const Color(0xFF050505)),
+      body: Stack(
+        children: [
+          // Native scroll area — matches HTML: body { height: 800vh }
+          SingleChildScrollView(
+            controller: _scrollController,
+            physics: _ready
+                ? const ClampingScrollPhysics()
+                : const NeverScrollableScrollPhysics(),
+            child: SizedBox(
+              width: double.infinity,
+              height: screenHeight * _scrollMultiplier,
+            ),
+          ),
+
+          // Frame image (fixed, doesn't scroll)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: Image(
+                  image: _providers[_currentFrame - 1],
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) =>
+                      Container(color: const Color(0xFF050505)),
+                ),
+              ),
+            ),
+          ),
+
+          // Loading overlay (initial load)
+          if (!_ready)
+            Positioned.fill(
+              child: Container(
+                color: const Color(0xFF050505),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 200,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: _loadProgress,
+                            minHeight: 3,
+                            backgroundColor: Colors.white.withOpacity(0.1),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white.withOpacity(0.7),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Loading experience… ${(_loadProgress * 100).toInt()}%',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.5),
+                          fontSize: 13,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
+            ),
 
-              // Loading overlay
-              if (!_ready)
-                Positioned.fill(
-                  child: Container(
-                    color: const Color(0xFF050505),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 200,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: _loadProgress,
-                                minHeight: 3,
-                                backgroundColor: Colors.white.withOpacity(0.1),
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.white.withOpacity(0.7),
-                                ),
-                              ),
+          // "Preparing skip…" overlay while waiting for all frames
+          if (_isSkipping && !_allLoaded)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withOpacity(0.6),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 200,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: _loadProgress,
+                            minHeight: 3,
+                            backgroundColor: Colors.white.withOpacity(0.1),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white.withOpacity(0.7),
                             ),
                           ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Loading experience… ${(_loadProgress * 100).toInt()}%',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.5),
-                              fontSize: 13,
-                              letterSpacing: 1.5,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Preparing walkthrough… ${(_loadProgress * 100).toInt()}%',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 13,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+              ),
+            ),
 
-              // Skip button — triggers auto-play
-              if (_ready && fraction < 0.95 && !_isAutoPlaying)
-                Positioned(
-                  bottom: 40,
-                  right: 40,
-                  child: _SkipButton(onTap: _startAutoPlay),
-                ),
+          // Skip button
+          if (_ready && _fraction < 0.95 && !_isSkipping)
+            Positioned(
+              bottom: 40,
+              right: 40,
+              child: _SkipButton(onTap: _startSkip),
+            ),
 
-              // Scroll-down hint
-              if (_ready && fraction < 0.04 && !_isAutoPlaying)
-                const Positioned(
-                  bottom: 100,
-                  left: 0,
-                  right: 0,
-                  child: _ScrollHint(),
-                ),
+          // Scroll hint
+          if (_ready && _fraction < 0.04 && !_isSkipping)
+            const Positioned(
+              bottom: 100,
+              left: 0,
+              right: 0,
+              child: _ScrollHint(),
+            ),
 
-              // Progress bar
-              if (_ready)
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  child: Container(
-                    height: 2,
-                    width: screenWidth * fraction,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          Colors.white.withOpacity(0.15),
-                          Colors.white.withOpacity(0.7),
-                        ],
-                      ),
-                    ),
+          // Progress bar
+          if (_ready)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              child: Container(
+                height: 2,
+                width: screenWidth * _fraction,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.white.withOpacity(0.15),
+                      Colors.white.withOpacity(0.7),
+                    ],
                   ),
                 ),
-            ],
-          ),
-        ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -399,7 +403,7 @@ class _SkipButtonState extends State<_SkipButton> {
   }
 }
 
-// ── Scroll-down hint ─────────────────────────────────────────────────────────
+// ── Scroll hint ──────────────────────────────────────────────────────────────
 
 class _ScrollHint extends StatelessWidget {
   const _ScrollHint();

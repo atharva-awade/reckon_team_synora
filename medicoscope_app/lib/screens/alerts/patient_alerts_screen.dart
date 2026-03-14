@@ -46,10 +46,31 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
     final patientId = authProvider.user?.id ?? '';
 
     try {
+      final token = authProvider.token ?? '';
       final alerts = await VitalsService.getPatientAlerts(
         patientId: patientId,
+        token: token,
       );
       if (!mounted) return;
+
+      // Ensure doctor_notified and emergency_notified fields exist
+      for (final a in alerts) {
+        // If doctor_id is set, the alert was sent to the doctor
+        a['doctor_notified'] = a['doctor_notified'] ??
+            (a['doctor_id'] != null && (a['doctor_id'] as String).isNotEmpty);
+        // If emergency_contact_phone is set, emergency was notified
+        a['emergency_notified'] = a['emergency_notified'] ??
+            (a['emergency_contact_phone'] != null &&
+                (a['emergency_contact_phone'] as String).isNotEmpty);
+      }
+
+      // Sort by created_at descending (newest first)
+      alerts.sort((a, b) {
+        final aTime = a['created_at']?.toString() ?? '';
+        final bTime = b['created_at']?.toString() ?? '';
+        return bTime.compareTo(aTime);
+      });
+
       setState(() {
         _alerts = alerts;
         if (!silent) _isLoading = false;
@@ -80,10 +101,13 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
         return const Color(0xFFFF5252);
       case 'high':
         return const Color(0xFFFF7043);
+      case 'warning':
       case 'medium':
         return const Color(0xFFFF9800);
-      default:
+      case 'low':
         return const Color(0xFF4CAF50);
+      default:
+        return const Color(0xFFFF9800);
     }
   }
 
@@ -102,13 +126,16 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
 
   String _timeAgo(String isoDate) {
     try {
-      // Server sends UTC timestamps without 'Z' suffix — force UTC parsing
+      if (isoDate.isEmpty) return '';
+      // Server sends UTC timestamps — normalize by ensuring Z suffix
       String normalized = isoDate.trim();
       if (!normalized.endsWith('Z') && !normalized.contains('+')) {
         normalized += 'Z';
       }
-      final date = DateTime.parse(normalized).toLocal();
-      final diff = DateTime.now().difference(date);
+      final date = DateTime.parse(normalized);
+      // Compare both in UTC to avoid any timezone confusion
+      final nowUtc = DateTime.now().toUtc();
+      final diff = nowUtc.difference(date);
       if (diff.isNegative || diff.inSeconds < 30) return 'Just now';
       if (diff.inMinutes < 1) return '${diff.inSeconds}s ago';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';

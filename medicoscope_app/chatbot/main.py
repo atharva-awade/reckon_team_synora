@@ -518,6 +518,9 @@ def _make_alert(session: dict, alert_type: str, severity: str,
         "patient_id": session.get("patient_id", ""),
         "patient_name": session.get("patient_name", ""),
         "doctor_id": session.get("doctor_id", ""),
+        "doctor_notified": bool(session.get("doctor_id", "")),
+        "emergency_notified": bool(session.get("emergency_contact_phone", "")),
+        "alert_type": alert_type,
         "created_at": datetime.utcnow().isoformat() + "Z",
         "read": False,
     }
@@ -560,6 +563,15 @@ async def vitals_start(req: VitalsStartRequest):
     }
 
     vitals_sessions[session_id] = session
+
+    # Clear old alerts for this patient/doctor so fresh session starts clean
+    patient_key = f"pat_{req.patient_id}"
+    doctor_key = f"doc_{req.doctor_id}"
+    if patient_key in vitals_alerts:
+        vitals_alerts[patient_key] = []
+    if doctor_key in vitals_alerts:
+        vitals_alerts[doctor_key] = []
+
     return {"session_id": session_id, "scenario": scenario}
 
 
@@ -618,6 +630,64 @@ async def vitals_delete_alert(alert_id: str):
     for key in list(vitals_alerts.keys()):
         vitals_alerts[key] = [a for a in vitals_alerts[key] if a.get("id") != alert_id]
     return {"status": "deleted"}
+
+
+class PushAlertRequest(BaseModel):
+    id: str = ""
+    type: str = "threshold_breach"
+    severity: str = "high"
+    message: str = ""
+    vital: str = ""
+    current_value: float = 0
+    predicted_value: float = 0
+    timestamp: str = ""
+    location: str = ""
+    latitude: float = 0
+    longitude: float = 0
+    maps_url: str = ""
+    emergency_contact_name: str = ""
+    emergency_contact_phone: str = ""
+    patient_id: str = ""
+    patient_name: str = ""
+    doctor_id: str = ""
+    created_at: str = ""
+
+
+@app.post("/vitals/alerts/push")
+async def vitals_push_alert(req: PushAlertRequest):
+    """Receive a client-generated alert and store it for doctor/patient viewing."""
+    alert = {
+        "id": req.id or str(uuid.uuid4()),
+        "type": req.type,
+        "severity": req.severity,
+        "message": req.message,
+        "vital": req.vital,
+        "current_value": req.current_value,
+        "predicted_value": req.predicted_value,
+        "timestamp": req.timestamp,
+        "location": req.location,
+        "latitude": req.latitude,
+        "longitude": req.longitude,
+        "maps_url": req.maps_url,
+        "emergency_contact_name": req.emergency_contact_name,
+        "emergency_contact_phone": req.emergency_contact_phone,
+        "patient_id": req.patient_id,
+        "patient_name": req.patient_name,
+        "doctor_id": req.doctor_id,
+        "doctor_notified": bool(req.doctor_id),
+        "emergency_notified": bool(req.emergency_contact_phone),
+        "alert_type": req.type,
+        "created_at": req.created_at or (datetime.utcnow().isoformat() + "Z"),
+        "read": False,
+    }
+
+    # Store for both doctor and patient
+    if req.doctor_id:
+        vitals_alerts.setdefault(f"doc_{req.doctor_id}", []).append(alert)
+    if req.patient_id:
+        vitals_alerts.setdefault(f"pat_{req.patient_id}", []).append(alert)
+
+    return {"status": "ok", "alert_id": alert["id"]}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -12,12 +12,8 @@ class MentalHealthService {
     required String doctorId,
     bool useSafetyPipeline = true,
   }) async {
-    final endpoint = useSafetyPipeline
-        ? ApiConstants.mentalHealthAnalyzeSafe
-        : ApiConstants.mentalHealthAnalyze;
-
     final url = Uri.parse(
-      '${ApiConstants.chatbotBaseUrl}$endpoint',
+      '${ApiConstants.chatbotBaseUrl}${ApiConstants.mentalHealthAnalyze}',
     );
 
     final request = http.MultipartRequest('POST', url)

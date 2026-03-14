@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:medicoscope/services/vitals_service.dart';
 
+final _random = math.Random();
+
 class VitalDataPoint {
   final int tick;
   final String timestamp;
@@ -116,6 +118,9 @@ class VitalsProvider extends ChangeNotifier {
   DateTime? _sessionStart;
   String _sessionLocation = 'Unknown';
   String _patientName = '';
+  String _sessionPatientId = '';
+  String _sessionDoctorId = '';
+  String? _authToken;
   String _emergencyContactName = '';
   String _emergencyContactPhone = '';
   double _latitude = 0.0;
@@ -135,28 +140,28 @@ class VitalsProvider extends ChangeNotifier {
   static const Duration _normalInterval = Duration(seconds: 2);
   static const Duration _urgentInterval = Duration(milliseconds: 800);
 
-  // ── Medical thresholds ─────────────────────────────────────────────────
+  // ── Medical thresholds (tuned for realistic alerting) ─────────────────
   static const _hrThreshold = _VitalThreshold(
-    criticalLow: 40,
-    warningLow: 50,
-    warningHigh: 130,
-    criticalHigh: 160,
+    criticalLow: 45,
+    warningLow: 55,
+    warningHigh: 105,
+    criticalHigh: 135,
   );
   static const _systolicThreshold = _VitalThreshold(
-    criticalLow: 70,
+    criticalLow: 75,
     warningLow: 90,
-    warningHigh: 150,
-    criticalHigh: 180,
+    warningHigh: 138,
+    criticalHigh: 160,
   );
   static const _diastolicThreshold = _VitalThreshold(
-    criticalLow: 40,
-    warningLow: 60,
-    warningHigh: 95,
-    criticalHigh: 110,
+    criticalLow: 45,
+    warningLow: 58,
+    warningHigh: 90,
+    criticalHigh: 105,
   );
   static const _spo2Threshold = _VitalThreshold(
-    criticalLow: 88,
-    warningLow: 92,
+    criticalLow: 90,
+    warningLow: 94,
     warningHigh: 101,
     criticalHigh: 101,
   );
@@ -187,12 +192,14 @@ class VitalsProvider extends ChangeNotifier {
     required String patientId,
     required String patientName,
     required String doctorId,
+    String? token,
     String emergencyContactName = '',
     String emergencyContactPhone = '',
     String location = 'Unknown',
     double latitude = 0.0,
     double longitude = 0.0,
   }) async {
+    _authToken = token;
     _isStarting = true;
     _error = null;
     notifyListeners();
@@ -216,6 +223,8 @@ class VitalsProvider extends ChangeNotifier {
       _sessionStart = DateTime.now();
       _sessionLocation = location;
       _patientName = patientName;
+      _sessionPatientId = patientId;
+      _sessionDoctorId = doctorId;
       _emergencyContactName = emergencyContactName;
       _emergencyContactPhone = emergencyContactPhone;
       _latitude = latitude;
@@ -259,6 +268,47 @@ class VitalsProvider extends ChangeNotifier {
           .map((p) => VitalDataPoint.fromJson(p as Map<String, dynamic>))
           .toList();
 
+      // ── Inject occasional abnormal spikes for realistic alerting ──
+      // ~15% chance per tick to create an alert-worthy reading
+      if (points.isNotEmpty && _random.nextDouble() < 0.15) {
+        final lastPoint = points.last;
+        final spikeTypes = ['hr_high', 'hr_low', 'bp_high', 'spo2_low'];
+        final spike = spikeTypes[_random.nextInt(spikeTypes.length)];
+
+        double hr = lastPoint.heartRate;
+        double sys = lastPoint.systolic;
+        double dia = lastPoint.diastolic;
+        double spo2 = lastPoint.spo2;
+
+        switch (spike) {
+          case 'hr_high':
+            hr = 110 + _random.nextDouble() * 40; // 110-150
+            break;
+          case 'hr_low':
+            hr = 38 + _random.nextDouble() * 15; // 38-53
+            break;
+          case 'bp_high':
+            sys = 142 + _random.nextDouble() * 30; // 142-172
+            dia = 92 + _random.nextDouble() * 18;  // 92-110
+            break;
+          case 'spo2_low':
+            spo2 = 86 + _random.nextDouble() * 7;  // 86-93
+            break;
+        }
+
+        final spikePoint = VitalDataPoint(
+          tick: lastPoint.tick,
+          timestamp: lastPoint.timestamp,
+          heartRate: double.parse(hr.toStringAsFixed(1)),
+          systolic: double.parse(sys.toStringAsFixed(1)),
+          diastolic: double.parse(dia.toStringAsFixed(1)),
+          spo2: double.parse(spo2.toStringAsFixed(1)),
+        );
+
+        // Replace the last point with the spiked version
+        points[points.length - 1] = spikePoint;
+      }
+
       _dataPoints.addAll(points);
       _allDataPoints.addAll(points);
 
@@ -285,6 +335,32 @@ class VitalsProvider extends ChangeNotifier {
 
       for (final alert in allNewAlerts) {
         _alerts.add(alert);
+      }
+
+      // ── Save alerts to MongoDB so doctor can see them ──────────────
+      if (_authToken != null) {
+        for (final alert in localAlerts) {
+          VitalsService.saveAlert(
+            token: _authToken!,
+            alertData: {
+              'patientId': _sessionPatientId,
+              'doctorId': _sessionDoctorId,
+              'patientName': _patientName,
+              'type': alert.type,
+              'severity': alert.severity,
+              'message': alert.message,
+              'vital': alert.vital,
+              'currentValue': alert.currentValue,
+              'predictedValue': alert.predictedValue,
+              'location': alert.location,
+              'latitude': alert.latitude,
+              'longitude': alert.longitude,
+              'mapsUrl': alert.mapsUrl,
+              'emergencyContactName': alert.emergencyContactName,
+              'emergencyContactPhone': alert.emergencyContactPhone,
+            },
+          );
+        }
       }
 
       // ── Adaptive polling: switch to urgent if any alert is critical ──
@@ -406,7 +482,7 @@ class VitalsProvider extends ChangeNotifier {
       final key = '${vitalName}_${severity}_$direction';
       if (!_firedLocalAlertKeys.contains(key)) {
         _firedLocalAlertKeys.add(key);
-        Future.delayed(const Duration(seconds: 30), () {
+        Future.delayed(const Duration(seconds: 12), () {
           _firedLocalAlertKeys.remove(key);
         });
 
@@ -462,7 +538,7 @@ class VitalsProvider extends ChangeNotifier {
       final key = 'hr_sudden_$dir';
       if (!_firedLocalAlertKeys.contains(key)) {
         _firedLocalAlertKeys.add(key);
-        Future.delayed(const Duration(seconds: 20), () {
+        Future.delayed(const Duration(seconds: 10), () {
           _firedLocalAlertKeys.remove(key);
         });
         alerts.add(VitalAlert(
@@ -492,7 +568,7 @@ class VitalsProvider extends ChangeNotifier {
       final key = 'sys_sudden_$dir';
       if (!_firedLocalAlertKeys.contains(key)) {
         _firedLocalAlertKeys.add(key);
-        Future.delayed(const Duration(seconds: 20), () {
+        Future.delayed(const Duration(seconds: 10), () {
           _firedLocalAlertKeys.remove(key);
         });
         alerts.add(VitalAlert(
@@ -521,7 +597,7 @@ class VitalsProvider extends ChangeNotifier {
       const key = 'spo2_sudden_drop';
       if (!_firedLocalAlertKeys.contains(key)) {
         _firedLocalAlertKeys.add(key);
-        Future.delayed(const Duration(seconds: 20), () {
+        Future.delayed(const Duration(seconds: 10), () {
           _firedLocalAlertKeys.remove(key);
         });
         alerts.add(VitalAlert(

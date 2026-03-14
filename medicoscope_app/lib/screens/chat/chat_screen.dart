@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:http/http.dart' as http;
 import 'package:medicoscope/core/theme/app_theme.dart';
 import 'package:medicoscope/core/providers/auth_provider.dart';
 import 'package:medicoscope/core/providers/coins_provider.dart';
+import 'package:medicoscope/core/constants/api_constants.dart';
 import 'package:medicoscope/core/widgets/glass_card.dart';
 import 'package:medicoscope/services/chat_service.dart';
 import 'package:provider/provider.dart';
@@ -32,6 +34,18 @@ class _ChatScreenState extends State<ChatScreen> {
       isUser: false,
     ));
     _loadMedicalContext();
+    _warmUpChatbot();
+  }
+
+  /// Silently ping the chatbot to wake it up from Render free tier sleep
+  Future<void> _warmUpChatbot() async {
+    try {
+      await http.get(
+        Uri.parse('${ApiConstants.chatbotBaseUrl}/health'),
+      ).timeout(const Duration(seconds: 60));
+    } catch (_) {
+      // Best effort warm-up — don't block anything
+    }
   }
 
   Future<void> _loadMedicalContext() async {
@@ -129,11 +143,13 @@ class _ChatScreenState extends State<ChatScreen> {
       final errorMsg = e.toString();
       String displayMsg;
       if (errorMsg.contains('warming up') || errorMsg.contains('503')) {
-        displayMsg = 'The chatbot is warming up. Please try again in a moment.';
-      } else if (errorMsg.contains('TimeoutException')) {
-        displayMsg = 'The request timed out. Please try again.';
+        displayMsg = 'The chatbot server is starting up (free tier cold start). Please wait 30-60 seconds and try again. This only happens on the first message after inactivity.';
+      } else if (errorMsg.contains('TimeoutException') || errorMsg.contains('timed out')) {
+        displayMsg = 'The server is waking up from sleep mode. Please wait a moment and send your message again — it will work on the next try.';
+      } else if (errorMsg.contains('500')) {
+        displayMsg = 'The AI service hit a temporary error. Please try again.';
       } else {
-        displayMsg = 'Sorry, I encountered an error. Please try again.';
+        displayMsg = 'Connection issue. Please check your internet and try again.';
       }
       setState(() {
         _messages.add(_ChatMessage(

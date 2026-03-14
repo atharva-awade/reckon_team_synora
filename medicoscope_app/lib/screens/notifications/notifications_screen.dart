@@ -81,7 +81,25 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     final userId = authProvider.user?.id ?? '';
 
     try {
-      final alerts = await VitalsService.getDoctorAlerts(doctorId: userId);
+      final token = authProvider.token ?? '';
+      final alerts = await VitalsService.getDoctorAlerts(doctorId: userId, token: token);
+
+      // Ensure doctor_notified field exists on all alerts
+      for (final a in alerts) {
+        a['doctor_notified'] = a['doctor_notified'] ??
+            (a['doctor_id'] != null && (a['doctor_id'] as String).isNotEmpty);
+        a['emergency_notified'] = a['emergency_notified'] ??
+            (a['emergency_contact_phone'] != null &&
+                (a['emergency_contact_phone'] as String).isNotEmpty);
+      }
+
+      // Sort newest first
+      alerts.sort((a, b) {
+        final aTime = a['created_at']?.toString() ?? '';
+        final bTime = b['created_at']?.toString() ?? '';
+        return bTime.compareTo(aTime);
+      });
+
       if (!mounted) return;
       setState(() {
         _vitalsAlerts = alerts;
@@ -172,9 +190,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   Color _urgencyColor(String urgency) {
     switch (urgency.toLowerCase()) {
-      case 'high':
       case 'critical':
         return const Color(0xFFFF5252);
+      case 'high':
+        return const Color(0xFFFF7043);
+      case 'warning':
       case 'medium':
         return const Color(0xFFFF9800);
       default:
@@ -184,12 +204,14 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   String _timeAgo(String isoDate) {
     try {
+      if (isoDate.isEmpty) return '';
       String normalized = isoDate.trim();
       if (!normalized.endsWith('Z') && !normalized.contains('+')) {
         normalized += 'Z';
       }
-      final date = DateTime.parse(normalized).toLocal();
-      final diff = DateTime.now().difference(date);
+      final date = DateTime.parse(normalized);
+      final nowUtc = DateTime.now().toUtc();
+      final diff = nowUtc.difference(date);
       if (diff.isNegative || diff.inSeconds < 30) return 'Just now';
       if (diff.inMinutes < 1) return '${diff.inSeconds}s ago';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';

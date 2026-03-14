@@ -27,13 +27,32 @@ class ChatService {
             if (medicalContext != null) 'medical_context': medicalContext,
           }),
         )
-        .timeout(const Duration(seconds: 30));
+        .timeout(const Duration(seconds: 90));
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       return data['response'] as String;
     } else if (response.statusCode == 503) {
       throw Exception('Chatbot is warming up. Please try again in a moment.');
+    } else if (response.statusCode == 500) {
+      // Retry once on 500 (Groq API rate limit)
+      final retry = await http
+          .post(
+            url,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'message': message,
+              'session_id': sessionId,
+              'patient_profile': patientProfile,
+              'language': language,
+            }),
+          )
+          .timeout(const Duration(seconds: 60));
+      if (retry.statusCode == 200) {
+        final data = jsonDecode(retry.body);
+        return data['response'] as String;
+      }
+      throw Exception('Chatbot error: ${response.statusCode}');
     } else {
       throw Exception('Chatbot error: ${response.statusCode}');
     }
@@ -61,7 +80,7 @@ class ChatService {
     final client = http.Client();
     try {
       final response =
-          await client.send(request).timeout(const Duration(seconds: 30));
+          await client.send(request).timeout(const Duration(seconds: 90));
 
       if (response.statusCode == 503) {
         throw Exception('Chatbot is warming up. Please try again in a moment.');

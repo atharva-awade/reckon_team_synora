@@ -155,6 +155,7 @@ class _VitalsScreenState extends State<VitalsScreen>
       patientId: authProvider.user?.id ?? 'anonymous',
       patientName: authProvider.user?.name ?? 'Patient',
       doctorId: _linkedDoctorId,
+      token: authProvider.token,
       emergencyContactName: _emergencyContactName,
       emergencyContactPhone: _emergencyContactPhone,
       location: _locationName,
@@ -1040,11 +1041,20 @@ class _VitalsScreenState extends State<VitalsScreen>
 
   String _formatAlertTime(String isoTimestamp) {
     try {
+      if (isoTimestamp.isEmpty) return '';
       String normalized = isoTimestamp.trim();
       if (!normalized.endsWith('Z') && !normalized.contains('+')) {
         normalized += 'Z';
       }
+      // Parse as UTC, convert to local for display
       final dt = DateTime.parse(normalized).toLocal();
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+
+      // Show relative time if recent, absolute time otherwise
+      if (diff.isNegative || diff.inSeconds < 10) return 'Just now';
+      if (diff.inMinutes < 1) return '${diff.inSeconds}s ago';
+      if (diff.inMinutes < 10) return '${diff.inMinutes}m ago';
       return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}';
     } catch (_) {
       return '';

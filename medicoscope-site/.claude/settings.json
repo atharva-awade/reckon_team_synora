@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter devices:*)",
+      "Bash(curl -s -w \"\\\\n%{http_code}\" --max-time 15 -X OPTIONS \"https://medicoscope-chatbot-mu7p.onrender.com/chat\" -H \"Origin: http://localhost:8080\" -H \"Access-Control-Request-Method: POST\" -H \"Access-Control-Request-Headers: Content-Type\")",
+      "Bash(curl -s --max-time 20 -X POST \"https://medicoscope-chatbot-mu7p.onrender.com/chat\" -H \"Content-Type: application/json\" -d '{\"\"message\"\":\"\"hello\"\",\"\"session_id\"\":\"\"test123\"\",\"\"patient_profile\"\":\"\"Name: Test\"\",\"\"language\"\":\"\"en\"\"}')",
+      "Bash(curl -s -D - --max-time 15 -X OPTIONS \"https://medicoscope-chatbot-mu7p.onrender.com/chat\" -H \"Origin: http://localhost:8080\" -H \"Access-Control-Request-Method: POST\" -H \"Access-Control-Request-Headers: Content-Type\" -o /dev/null)",
+      "Bash(flutter build:*)"
+    ]
+  }
+}
