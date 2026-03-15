@@ -106,8 +106,14 @@ class VitalsService {
   }
 
   static Future<void> _saveToMongoDB(String token, Map<String, dynamic> alertData) async {
-    final api = ApiService(token: token);
-    await api.post('/vitals/alerts', alertData);
+    try {
+      final api = ApiService(token: token);
+      await api.post('/vitals/alerts', alertData);
+      print('[ALERT] Saved to MongoDB successfully: ${alertData['vital']} ${alertData['severity']}');
+    } catch (e) {
+      print('[ALERT] MongoDB save FAILED: $e');
+      rethrow;
+    }
   }
 
   static Future<void> _saveToPython(Map<String, dynamic> alertData, String alertId, String now) async {
@@ -152,9 +158,13 @@ class VitalsService {
       if (token != null) {
         final api = ApiService(token: token);
         final response = await api.get('/vitals/alerts/doctor/$doctorId');
-        allAlerts.addAll(List<Map<String, dynamic>>.from(response['alerts'] ?? []));
+        final mongoAlerts = List<Map<String, dynamic>>.from(response['alerts'] ?? []);
+        print('[FETCH-DOC] MongoDB returned ${mongoAlerts.length} alerts for doctor $doctorId');
+        allAlerts.addAll(mongoAlerts);
       }
-    } catch (_) {}
+    } catch (e) {
+      print('[FETCH-DOC] MongoDB fetch failed: $e');
+    }
 
     // Source 2: Python in-memory
     try {
@@ -165,7 +175,7 @@ class VitalsService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final pythonAlerts = List<Map<String, dynamic>>.from(data['alerts'] ?? []);
-        // Add python alerts that aren't already in MongoDB results
+        print('[FETCH-DOC] Python returned ${pythonAlerts.length} alerts for doctor $doctorId');
         final existingIds = allAlerts.map((a) => a['id']).toSet();
         for (final a in pythonAlerts) {
           if (!existingIds.contains(a['id'])) {
@@ -176,7 +186,9 @@ class VitalsService {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      print('[FETCH-DOC] Python fetch failed: $e');
+    }
 
     // Sort newest first
     allAlerts.sort((a, b) {
@@ -200,9 +212,13 @@ class VitalsService {
       if (token != null) {
         final api = ApiService(token: token);
         final response = await api.get('/vitals/alerts/patient/$patientId');
-        allAlerts.addAll(List<Map<String, dynamic>>.from(response['alerts'] ?? []));
+        final mongoAlerts = List<Map<String, dynamic>>.from(response['alerts'] ?? []);
+        print('[FETCH-PAT] MongoDB returned ${mongoAlerts.length} alerts for patient $patientId');
+        allAlerts.addAll(mongoAlerts);
       }
-    } catch (_) {}
+    } catch (e) {
+      print('[FETCH-PAT] MongoDB fetch failed: $e');
+    }
 
     // Source 2: Python in-memory
     try {
@@ -213,6 +229,7 @@ class VitalsService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final pythonAlerts = List<Map<String, dynamic>>.from(data['alerts'] ?? []);
+        print('[FETCH-PAT] Python returned ${pythonAlerts.length} alerts for patient $patientId');
         final existingIds = allAlerts.map((a) => a['id']).toSet();
         for (final a in pythonAlerts) {
           if (!existingIds.contains(a['id'])) {
@@ -224,7 +241,9 @@ class VitalsService {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      print('[FETCH-PAT] Python fetch failed: $e');
+    }
 
     allAlerts.sort((a, b) {
       final aTime = a['created_at']?.toString() ?? a['createdAt']?.toString() ?? '';

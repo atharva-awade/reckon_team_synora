@@ -76,7 +76,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
 
   Future<void> _deleteVitalsAlert(String alertId) async {
     try {
-      await VitalsService.deleteAlert(alertId: alertId);
+      final token = Provider.of<AuthProvider>(context, listen: false).token ?? '';
+      await VitalsService.deleteAlert(alertId: alertId, token: token);
       setState(() {
         _vitalsAlerts.removeWhere((a) => a['id'] == alertId);
       });

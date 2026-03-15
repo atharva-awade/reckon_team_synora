@@ -49,13 +49,20 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadMedicalContext() async {
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final token = authProvider.token;
-    if (token != null && authProvider.isPatient) {
-      final ctx = await ChatService.fetchMedicalContext(token);
-      if (ctx.isNotEmpty) {
-        _medicalContext = ctx;
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final token = authProvider.token;
+      if (token != null && authProvider.isPatient) {
+        final ctx = await ChatService.fetchMedicalContext(token)
+            .timeout(const Duration(seconds: 8), onTimeout: () => '');
+        if (ctx.isNotEmpty) {
+          _medicalContext = ctx;
+          print('[CHAT] Medical context loaded (${ctx.length} chars)');
+        }
       }
+    } catch (e) {
+      print('[CHAT] Medical context load failed (non-blocking): $e');
+      // Non-blocking — chat works without context
     }
   }
 
@@ -97,20 +104,52 @@ class _ChatScreenState extends State<ChatScreen> {
     _controller.clear();
     _scrollToBottom();
 
-    try {
-      final response = await ChatService.sendMessage(
-        message: text,
-        sessionId: sessionId,
-        patientProfile: patientProfile,
-        medicalContext: _medicalContext,
-      );
+    // Try up to 2 times (auto-retry on first failure for cold starts)
+    String? response;
+    String? lastError;
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        print('[CHAT] Attempt ${attempt + 1}: sending message to chatbot...');
+        response = await ChatService.sendMessage(
+          message: text,
+          sessionId: sessionId,
+          patientProfile: patientProfile,
+          medicalContext: attempt == 0 ? _medicalContext : null, // skip context on retry for speed
+        );
+        print('[CHAT] Got response: ${response.substring(0, response.length > 50 ? 50 : response.length)}...');
+        break; // Success
+      } catch (e) {
+        lastError = e.toString();
+        print('[CHAT] Attempt ${attempt + 1} failed: $lastError');
+        if (attempt == 0) {
+          // Show "retrying" indicator
+          if (mounted) {
+            setState(() {
+              _messages.add(_ChatMessage(
+                text: 'Server is waking up... retrying automatically...',
+                isUser: false,
+              ));
+            });
+            _scrollToBottom();
+          }
+          await Future.delayed(const Duration(seconds: 2));
+          // Remove the "retrying" message before actual retry
+          if (mounted) {
+            setState(() {
+              _messages.removeLast();
+            });
+          }
+        }
+      }
+    }
 
+    if (response != null) {
       setState(() {
-        _messages.add(_ChatMessage(text: response, isUser: false));
+        _messages.add(_ChatMessage(text: response!, isUser: false));
         _isLoading = false;
       });
 
-      // Save to DB
+      // Save to DB (fire and forget)
       if (authProvider.token != null) {
         ChatService.saveMessageToDb(
           token: authProvider.token!,
@@ -120,40 +159,30 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
 
-      // Award chat coins (max once per day)
-      final coinsProvider = Provider.of<CoinsProvider>(context, listen: false);
-      final earned = await coinsProvider.addChatCoins();
-      if (earned > 0 && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(children: [
-              const Icon(Icons.stars_rounded, color: Colors.white, size: 18),
-              const SizedBox(width: 8),
-              Text('+$earned Mind Coins for chatting!'),
-            ]),
-            backgroundColor: const Color(0xFFFFA000),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
-      }
-    } catch (e) {
-      final errorMsg = e.toString();
-      String displayMsg;
-      if (errorMsg.contains('warming up') || errorMsg.contains('503')) {
-        displayMsg = 'The chatbot server is starting up (free tier cold start). Please wait 30-60 seconds and try again. This only happens on the first message after inactivity.';
-      } else if (errorMsg.contains('TimeoutException') || errorMsg.contains('timed out')) {
-        displayMsg = 'The server is waking up from sleep mode. Please wait a moment and send your message again — it will work on the next try.';
-      } else if (errorMsg.contains('500')) {
-        displayMsg = 'The AI service hit a temporary error. Please try again.';
-      } else {
-        displayMsg = 'Connection issue. Please check your internet and try again.';
-      }
+      // Award chat coins
+      try {
+        final coinsProvider = Provider.of<CoinsProvider>(context, listen: false);
+        final earned = await coinsProvider.addChatCoins();
+        if (earned > 0 && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(children: [
+                const Icon(Icons.stars_rounded, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Text('+$earned Mind Coins for chatting!'),
+              ]),
+              backgroundColor: const Color(0xFFFFA000),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+        }
+      } catch (_) {}
+    } else {
       setState(() {
         _messages.add(_ChatMessage(
-          text: displayMsg,
+          text: 'Sorry, the chatbot is temporarily unavailable. Please try again in a moment.',
           isUser: false,
         ));
         _isLoading = false;

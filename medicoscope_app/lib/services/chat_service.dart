@@ -15,19 +15,25 @@ class ChatService {
   }) async {
     final url = Uri.parse('${ApiConstants.chatbotBaseUrl}/chat');
 
+    final body = {
+      'message': message,
+      'session_id': sessionId,
+      'patient_profile': patientProfile,
+      'language': language,
+      if (medicalContext != null && medicalContext.isNotEmpty) 'medical_context': medicalContext,
+    };
+
+    print('[ChatService] POST /chat with message: "${message.substring(0, message.length > 30 ? 30 : message.length)}..."');
+
     final response = await http
         .post(
           url,
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'message': message,
-            'session_id': sessionId,
-            'patient_profile': patientProfile,
-            'language': language,
-            if (medicalContext != null) 'medical_context': medicalContext,
-          }),
+          body: jsonEncode(body),
         )
         .timeout(const Duration(seconds: 90));
+
+    print('[ChatService] Response status: ${response.statusCode}');
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -35,7 +41,8 @@ class ChatService {
     } else if (response.statusCode == 503) {
       throw Exception('Chatbot is warming up. Please try again in a moment.');
     } else if (response.statusCode == 500) {
-      // Retry once on 500 (Groq API rate limit)
+      print('[ChatService] Got 500, retrying without context...');
+      // Retry once on 500 (Groq API rate limit) - without medical context to reduce payload
       final retry = await http
           .post(
             url,
@@ -52,9 +59,9 @@ class ChatService {
         final data = jsonDecode(retry.body);
         return data['response'] as String;
       }
-      throw Exception('Chatbot error: ${response.statusCode}');
+      throw Exception('Chatbot error: ${response.statusCode} - ${response.body}');
     } else {
-      throw Exception('Chatbot error: ${response.statusCode}');
+      throw Exception('Chatbot error: ${response.statusCode} - ${response.body}');
     }
   }
 
