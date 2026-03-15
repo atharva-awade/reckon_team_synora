@@ -63,7 +63,8 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
 
   Future<void> _markAsRead(String id) async {
     try {
-      await VitalsService.markAlertRead(alertId: id);
+      final token = Provider.of<AuthProvider>(context, listen: false).token ?? '';
+      await VitalsService.markAlertRead(alertId: id, token: token);
       setState(() {
         for (final a in _alerts) {
           if (a['id'] == id) {

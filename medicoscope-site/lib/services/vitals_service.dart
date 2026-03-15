@@ -85,53 +85,189 @@ class VitalsService {
     await http.delete(url).timeout(const Duration(seconds: 10));
   }
 
+  // ── Persistent alert methods (via Node.js → MongoDB) ───────────────────
+
+  /// Save a vitals alert — fires BOTH Node.js MongoDB AND Python in-memory
+  static Future<void> saveAlert({
+    required String token,
+    required Map<String, dynamic> alertData,
+  }) async {
+    final now = DateTime.now().toUtc().toIso8601String() + 'Z';
+    final alertId = '${DateTime.now().millisecondsSinceEpoch}_${alertData['vital']}';
+
+    await Future.wait([
+      _saveToMongoDB(token, alertData).catchError((_) {}),
+      _saveToPython(alertData, alertId, now).catchError((_) {}),
+    ]);
+  }
+
+  static Future<void> _saveToMongoDB(String token, Map<String, dynamic> alertData) async {
+    final api = ApiService(token: token);
+    await api.post('/vitals/alerts', alertData);
+  }
+
+  static Future<void> _saveToPython(Map<String, dynamic> alertData, String alertId, String now) async {
+    final url = Uri.parse('${ApiConstants.chatbotBaseUrl}/vitals/alerts/push');
+    await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'id': alertId,
+            'type': alertData['type'] ?? 'threshold_breach',
+            'severity': alertData['severity'] ?? 'high',
+            'message': alertData['message'] ?? '',
+            'vital': alertData['vital'] ?? '',
+            'current_value': alertData['currentValue'] ?? 0,
+            'predicted_value': alertData['predictedValue'] ?? 0,
+            'timestamp': now,
+            'location': alertData['location'] ?? '',
+            'latitude': alertData['latitude'] ?? 0,
+            'longitude': alertData['longitude'] ?? 0,
+            'maps_url': alertData['mapsUrl'] ?? '',
+            'emergency_contact_name': alertData['emergencyContactName'] ?? '',
+            'emergency_contact_phone': alertData['emergencyContactPhone'] ?? '',
+            'patient_id': alertData['patientId'] ?? '',
+            'patient_name': alertData['patientName'] ?? '',
+            'doctor_id': alertData['doctorId'] ?? '',
+            'created_at': now,
+          }),
+        )
+        .timeout(const Duration(seconds: 3));
+  }
+
+  /// Get doctor's vitals alerts — merge from both MongoDB and Python
   static Future<List<Map<String, dynamic>>> getDoctorAlerts({
     required String doctorId,
+    String? token,
   }) async {
-    final url = Uri.parse(
-      '${ApiConstants.chatbotBaseUrl}${ApiConstants.vitalsDoctorAlerts}/$doctorId',
-    );
+    final allAlerts = <Map<String, dynamic>>[];
 
-    final response = await http.get(url).timeout(const Duration(seconds: 15));
+    // Source 1: Node.js MongoDB (persistent)
+    try {
+      if (token != null) {
+        final api = ApiService(token: token);
+        final response = await api.get('/vitals/alerts/doctor/$doctorId');
+        allAlerts.addAll(List<Map<String, dynamic>>.from(response['alerts'] ?? []));
+      }
+    } catch (_) {}
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return List<Map<String, dynamic>>.from(data['alerts'] ?? []);
-    } else {
-      throw Exception('Failed to fetch alerts: ${response.statusCode}');
-    }
+    // Source 2: Python in-memory
+    try {
+      final url = Uri.parse(
+        '${ApiConstants.chatbotBaseUrl}${ApiConstants.vitalsDoctorAlerts}/$doctorId',
+      );
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final pythonAlerts = List<Map<String, dynamic>>.from(data['alerts'] ?? []);
+        final existingIds = allAlerts.map((a) => a['id']).toSet();
+        for (final a in pythonAlerts) {
+          if (!existingIds.contains(a['id'])) {
+            a['doctor_notified'] = a['doctor_notified'] ?? true;
+            a['emergency_notified'] = a['emergency_notified'] ??
+                (a['emergency_contact_phone'] != null && (a['emergency_contact_phone'] as String).isNotEmpty);
+            allAlerts.add(a);
+          }
+        }
+      }
+    } catch (_) {}
+
+    allAlerts.sort((a, b) {
+      final aTime = a['created_at']?.toString() ?? a['createdAt']?.toString() ?? '';
+      final bTime = b['created_at']?.toString() ?? b['createdAt']?.toString() ?? '';
+      return bTime.compareTo(aTime);
+    });
+
+    return allAlerts;
   }
 
+  /// Get patient's vitals alerts — merge from both MongoDB and Python
   static Future<List<Map<String, dynamic>>> getPatientAlerts({
     required String patientId,
+    String? token,
   }) async {
-    final url = Uri.parse(
-      '${ApiConstants.chatbotBaseUrl}${ApiConstants.vitalsPatientAlerts}/$patientId',
-    );
+    final allAlerts = <Map<String, dynamic>>[];
 
-    final response = await http.get(url).timeout(const Duration(seconds: 15));
+    try {
+      if (token != null) {
+        final api = ApiService(token: token);
+        final response = await api.get('/vitals/alerts/patient/$patientId');
+        allAlerts.addAll(List<Map<String, dynamic>>.from(response['alerts'] ?? []));
+      }
+    } catch (_) {}
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return List<Map<String, dynamic>>.from(data['alerts'] ?? []);
-    } else {
-      throw Exception('Failed to fetch alerts: ${response.statusCode}');
-    }
+    try {
+      final url = Uri.parse(
+        '${ApiConstants.chatbotBaseUrl}${ApiConstants.vitalsPatientAlerts}/$patientId',
+      );
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final pythonAlerts = List<Map<String, dynamic>>.from(data['alerts'] ?? []);
+        final existingIds = allAlerts.map((a) => a['id']).toSet();
+        for (final a in pythonAlerts) {
+          if (!existingIds.contains(a['id'])) {
+            a['doctor_notified'] = a['doctor_notified'] ??
+                (a['doctor_id'] != null && (a['doctor_id'] as String).isNotEmpty);
+            a['emergency_notified'] = a['emergency_notified'] ??
+                (a['emergency_contact_phone'] != null && (a['emergency_contact_phone'] as String).isNotEmpty);
+            allAlerts.add(a);
+          }
+        }
+      }
+    } catch (_) {}
+
+    allAlerts.sort((a, b) {
+      final aTime = a['created_at']?.toString() ?? a['createdAt']?.toString() ?? '';
+      final bTime = b['created_at']?.toString() ?? b['createdAt']?.toString() ?? '';
+      return bTime.compareTo(aTime);
+    });
+
+    return allAlerts;
   }
 
-  static Future<void> markAlertRead({required String alertId}) async {
-    final url = Uri.parse(
-      '${ApiConstants.chatbotBaseUrl}/vitals/alerts/$alertId/read',
-    );
-
-    await http.put(url).timeout(const Duration(seconds: 10));
+  static Future<void> markAlertRead({
+    required String alertId,
+    required String token,
+  }) async {
+    await Future.wait([
+      () async {
+        try {
+          final api = ApiService(token: token);
+          await api.put('/vitals/alerts/$alertId/read', {});
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          final url = Uri.parse(
+            '${ApiConstants.chatbotBaseUrl}/vitals/alerts/$alertId/read',
+          );
+          await http.put(url).timeout(const Duration(seconds: 5));
+        } catch (_) {}
+      }(),
+    ]);
   }
 
-  static Future<void> deleteAlert({required String alertId}) async {
-    final url = Uri.parse(
-      '${ApiConstants.chatbotBaseUrl}/vitals/alerts/$alertId',
-    );
-
-    await http.delete(url).timeout(const Duration(seconds: 10));
+  static Future<void> deleteAlert({
+    required String alertId,
+    required String token,
+  }) async {
+    await Future.wait([
+      () async {
+        try {
+          final api = ApiService(token: token);
+          await api.delete('/vitals/alerts/$alertId');
+        } catch (_) {}
+      }(),
+      () async {
+        try {
+          final url = Uri.parse(
+            '${ApiConstants.chatbotBaseUrl}/vitals/alerts/$alertId',
+          );
+          await http.delete(url).timeout(const Duration(seconds: 5));
+        } catch (_) {}
+      }(),
+    ]);
   }
 }
