@@ -183,9 +183,15 @@ class _ChatBottomSheetState extends State<_ChatBottomSheet> {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final sessionId = auth.user?.id ?? 'anonymous';
 
-    // Wait for profile if not yet loaded
+    // Wait for profile if not yet loaded (max 5s)
     if (!_profileLoaded) {
-      await _loadMedicalSummary();
+      await _loadMedicalSummary().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          _profileLoaded = true;
+          _medicalProfile = 'Name: ${auth.user?.name ?? "Patient"}';
+        },
+      );
     }
 
     setState(() {
@@ -197,25 +203,52 @@ class _ChatBottomSheetState extends State<_ChatBottomSheet> {
     _scrollToBottom();
 
     try {
-      // Use streaming endpoint for real-time token delivery
       final lang =
           Provider.of<LocaleProvider>(context, listen: false).languageCode;
-      final stream = ChatService.sendMessageStream(
-        message: text,
-        sessionId: sessionId,
-        patientProfile: _medicalProfile,
-        language: lang,
-        medicalContext: _medicalProfile,
-      );
 
-      await for (final token in stream) {
+      // Try streaming first, fallback to non-streaming
+      bool streamingWorked = false;
+      try {
+        print('[CHAT-SHEET] Trying streaming endpoint...');
+        final stream = ChatService.sendMessageStream(
+          message: text,
+          sessionId: sessionId,
+          patientProfile: _medicalProfile,
+          language: lang,
+          medicalContext: _medicalProfile,
+        );
+
+        await for (final token in stream) {
+          if (mounted) {
+            setState(() => _streamingText += token);
+            _scrollToBottom();
+          }
+        }
+        streamingWorked = _streamingText.isNotEmpty;
+        print('[CHAT-SHEET] Streaming ${streamingWorked ? "succeeded" : "returned empty"}');
+      } catch (streamErr) {
+        print('[CHAT-SHEET] Streaming failed: $streamErr, falling back to non-streaming...');
+      }
+
+      // Fallback: non-streaming if streaming failed or returned empty
+      if (!streamingWorked) {
+        print('[CHAT-SHEET] Using non-streaming fallback...');
         if (mounted) {
-          setState(() => _streamingText += token);
-          _scrollToBottom();
+          setState(() => _streamingText = '');
+        }
+        final response = await ChatService.sendMessage(
+          message: text,
+          sessionId: sessionId,
+          patientProfile: _medicalProfile,
+          language: lang,
+          medicalContext: _medicalProfile,
+        );
+        if (mounted) {
+          setState(() => _streamingText = response);
         }
       }
 
-      // Streaming complete — move streamed text to messages list
+      // Move result to messages list
       if (mounted) {
         final finalText = _streamingText;
         setState(() {
@@ -228,26 +261,22 @@ class _ChatBottomSheetState extends State<_ChatBottomSheet> {
       }
 
       // Award chat coins
-      final coinsProvider = Provider.of<CoinsProvider>(context, listen: false);
-      await coinsProvider.addChatCoins();
+      try {
+        final coinsProvider = Provider.of<CoinsProvider>(context, listen: false);
+        await coinsProvider.addChatCoins();
+      } catch (_) {}
     } catch (e) {
-      final errorMsg = e.toString();
-      String displayMsg;
-      if (errorMsg.contains('warming up') || errorMsg.contains('503')) {
-        displayMsg = 'The chatbot is warming up. Please try again in a moment.';
-      } else if (errorMsg.contains('TimeoutException')) {
-        displayMsg = 'The request timed out. Please try again.';
-      } else {
-        displayMsg = 'Sorry, I encountered an error. Please try again.';
-      }
+      print('[CHAT-SHEET] Both streaming and fallback failed: $e');
       if (mounted) {
         setState(() {
-          // If we got partial streaming text, keep it
           if (_streamingText.isNotEmpty) {
             _messages.add(_ChatMsg(text: _streamingText, isUser: false));
           }
           _streamingText = '';
-          _messages.add(_ChatMsg(text: displayMsg, isUser: false));
+          _messages.add(_ChatMsg(
+            text: 'Server is waking up. Please send your message again — it will work on the next try.',
+            isUser: false,
+          ));
           _isLoading = false;
         });
       }
