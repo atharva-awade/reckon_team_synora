@@ -128,17 +128,17 @@ class _PatientAlertsScreenState extends State<PatientAlertsScreen> {
   String _timeAgo(String isoDate) {
     try {
       if (isoDate.isEmpty) return '';
-      // Server sends UTC timestamps — normalize by ensuring Z suffix
       String normalized = isoDate.trim();
       if (!normalized.endsWith('Z') && !normalized.contains('+')) {
         normalized += 'Z';
       }
-      final date = DateTime.parse(normalized);
-      // Compare both in UTC to avoid any timezone confusion
+      final dateUtc = DateTime.parse(normalized).toUtc();
       final nowUtc = DateTime.now().toUtc();
-      final diff = nowUtc.difference(date);
-      if (diff.isNegative || diff.inSeconds < 30) return 'Just now';
-      if (diff.inMinutes < 1) return '${diff.inSeconds}s ago';
+      final diff = nowUtc.difference(dateUtc);
+      print('[TIME-PAT] raw=$isoDate parsed=$dateUtc now=$nowUtc diff=${diff.inSeconds}s');
+      if (diff.isNegative) return 'Just now';
+      if (diff.inSeconds < 30) return 'Just now';
+      if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
       if (diff.inHours < 24) return '${diff.inHours}h ago';
       return '${diff.inDays}d ago';
